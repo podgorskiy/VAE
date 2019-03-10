@@ -31,7 +31,8 @@ class VAE(nn.Module):
         mul = 1
         inputs = channels
         for i in range(self.layer_count):
-            setattr(self, "conv%d" % (i + 1), nn.Conv2d(inputs, d * mul, 4, 2, 1))
+            setattr(self, "conv%d" % (i + 1), nn.Conv2d(inputs, inputs, 4, 2, 1, groups=inputs))
+            setattr(self, "conv%d_1x1" % (i + 1), nn.Conv2d(inputs, d * mul, 1, 1, 0))
             setattr(self, "conv%d_bn" % (i + 1), nn.BatchNorm2d(d * mul))
             inputs = d * mul
             mul *= 2
@@ -46,16 +47,18 @@ class VAE(nn.Module):
         mul = inputs // d // 2
 
         for i in range(1, self.layer_count):
-            setattr(self, "deconv%d" % (i + 1), nn.ConvTranspose2d(inputs, d * mul, 4, 2, 1))
+            setattr(self, "deconv%d" % (i + 1), nn.ConvTranspose2d(inputs, inputs, 4, 2, 1, groups=inputs))
+            setattr(self, "deconv%d_1x1" % (i + 1), nn.Conv2d(inputs, d * mul, 1, 1, 0))
             setattr(self, "deconv%d_bn" % (i + 1), nn.BatchNorm2d(d * mul))
             inputs = d * mul
             mul //= 2
 
-        setattr(self, "deconv%d" % (self.layer_count + 1), nn.ConvTranspose2d(inputs, channels, 4, 2, 1))
+        setattr(self, "deconv%d" % (self.layer_count + 1), nn.ConvTranspose2d(inputs, inputs, 4, 2, 1, groups=inputs))
+        setattr(self, "deconv%d_1x1" % (self.layer_count + 1), nn.Conv2d(inputs, channels, 1, 1, 0))
 
     def encode(self, x):
         for i in range(self.layer_count):
-            x = F.relu(getattr(self, "conv%d_bn" % (i + 1))(getattr(self, "conv%d" % (i + 1))(x)))
+            x = F.relu(getattr(self, "conv%d_bn" % (i + 1))(getattr(self, "conv%d_1x1" % (i + 1))(getattr(self, "conv%d" % (i + 1))(x))))
 
         x = x.view(x.shape[0], self.d_max * 4 * 4)
         h1 = self.fc1(x)
@@ -78,9 +81,9 @@ class VAE(nn.Module):
         x = F.leaky_relu(x, 0.2)
 
         for i in range(1, self.layer_count):
-            x = F.leaky_relu(getattr(self, "deconv%d_bn" % (i + 1))(getattr(self, "deconv%d" % (i + 1))(x)), 0.2)
+            x = F.leaky_relu(getattr(self, "deconv%d_bn" % (i + 1))(getattr(self, "deconv%d_1x1" % (i + 1))(getattr(self, "deconv%d" % (i + 1))(x))), 0.2)
 
-        x = F.tanh(getattr(self, "deconv%d" % (self.layer_count + 1))(x))
+        x = F.tanh(getattr(self, "deconv%d_1x1" % (self.layer_count + 1))(getattr(self, "deconv%d" % (self.layer_count + 1))(x)))
         return x
 
     def forward(self, x):
